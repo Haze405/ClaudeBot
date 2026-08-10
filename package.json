@@ -1,0 +1,19 @@
+{
+  "name": "minecraft-claude-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A hosted Claude agent that controls a Minecraft bot through the yuniko-software/minecraft-mcp-server MCP server.",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}
