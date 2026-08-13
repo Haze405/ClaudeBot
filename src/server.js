@@ -5,11 +5,27 @@ import express from "express";
 import { config, publicConfig, updateConfig, clearApiKey } from "./config.js";
 import { MinecraftMcp } from "./mcp.js";
 import { MinecraftAgent } from "./agent.js";
+import { JobQueue } from "./jobs.js";
+import { createApiRouter } from "./api.js";
+import { startLocalRunner } from "./runner.js";
+import { Lock } from "./lock.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const mcp = new MinecraftMcp(config);
 const agent = new MinecraftAgent(mcp);
+
+/**
+ * "local"  — this machine owns the bot and runs instructions itself.
+ * "relay"  — this machine only takes requests; a worker elsewhere (the
+ *            computer with Minecraft open) pulls them and does the work.
+ */
+// `npm run relay` passes --relay; RELAY_ONLY=1 does the same for hosts that
+// only let you set environment variables.
+const MODE =
+  process.env.RELAY_ONLY === "1" || process.argv.includes("--relay") ? "relay" : "local";
+const queue = new JobQueue();
+const lock = new Lock();
 
 const app = express();
 // Images arrive base64-encoded inside the chat JSON body, well past the 100kb default.
@@ -98,8 +114,18 @@ function validateImages(raw) {
   });
 }
 
-// The agent keeps one shared conversation, so only one turn may run at a time.
-let busy = false;
+// In local mode this process carries out the instructions itself. In relay
+// mode nothing drains the queue here — a remote worker does it over HTTP.
+if (MODE === "local") startLocalRunner({ queue, agent, mcp, lock });
+
+app.use(
+  "/api",
+  createApiRouter({
+    queue,
+    validateImages,
+    describeRuntime: () => ({ mode: MODE, connected: mcp.connected }),
+  }),
+);
 
 /**
  * Host-only middleware. When `HOST_TOKEN` is set the request must include
@@ -122,16 +148,21 @@ function requireHost(req, res, next) {
 }
 
 app.get("/api/status", (req, res) => {
+  const stats = queue.stats();
   res.json({
     connected: mcp.connected,
     tools: mcp.tools.map((t) => t.name),
-    busy,
+    busy: lock.busy || stats.running > 0,
+    mode: MODE,
+    queued: stats.queued,
+    running: stats.running,
+    workers: stats.workers,
     ...publicConfig(),
   });
 });
 
 app.post("/api/settings", async (req, res) => {
-  if (busy) {
+  if (lock.busy) {
     return res.status(409).json({ error: "Wait for the current message to finish." });
   }
 
@@ -159,6 +190,11 @@ app.post("/api/forget-key", requireHost, (req, res) => {
 });
 
 app.post("/api/connect", requireHost, async (req, res) => {
+  if (MODE === "relay") {
+    return res.status(409).json({
+      error: "This server is a relay. Connect the bot from the worker on the Minecraft machine.",
+    });
+  }
   try {
     const tools = await mcp.connect();
     res.json({ connected: true, tools: tools.map((t) => t.name) });
@@ -173,9 +209,11 @@ app.post("/api/disconnect", requireHost, async (req, res) => {
   res.json({ connected: false });
 });
 
+// Queued rather than applied on the spot: wiping the conversation out from
+// under a build in progress would leave the agent with no idea what it was doing.
 app.post("/api/reset", (req, res) => {
-  agent.reset();
-  res.json({ ok: true });
+  const job = queue.enqueue({ control: "reset", source: "ui" });
+  res.json({ ok: true, id: job.id });
 });
 
 app.post("/api/chat", async (req, res) => {
@@ -191,17 +229,28 @@ app.post("/api/chat", async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
-  if (!mcp.connected) {
-    return res.status(409).json({ error: "Not connected to the Minecraft MCP server." });
-  }
-  if (!config.apiKey) {
-    return res.status(400).json({ error: "Save a Claude API key in Settings first." });
-  }
-  if (busy) {
-    return res.status(409).json({ error: "The agent is still working on the previous message." });
+  // Fail early with something the page can explain, rather than queueing a
+  // message that is guaranteed to fail once it reaches the front.
+  if (MODE === "local") {
+    if (!mcp.connected) {
+      return res.status(409).json({ error: "Not connected to the Minecraft MCP server." });
+    }
+    if (!config.apiKey) {
+      return res.status(400).json({ error: "Save a Claude API key in Settings first." });
+    }
+  } else if (queue.activeWorkers().length === 0) {
+    return res.status(409).json({
+      error: "No Minecraft worker is attached. Start the worker on the computer running Minecraft.",
+    });
   }
 
-  busy = true;
+  let job;
+  try {
+    job = queue.enqueue({ message, images, source: "ui" });
+  } catch (err) {
+    return res.status(429).json({ error: err.message });
+  }
+
   res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
   res.setHeader("Cache-Control", "no-cache");
   res.flushHeaders();
@@ -209,13 +258,12 @@ app.post("/api/chat", async (req, res) => {
   const send = (event) => res.write(JSON.stringify(event) + "\n");
 
   try {
-    for await (const event of agent.run(message, { images })) {
+    for await (const event of queue.stream(job.id)) {
       send(event);
     }
   } catch (err) {
     send({ type: "error", text: err.message });
   } finally {
-    busy = false;
     res.end();
   }
 });
@@ -245,8 +293,20 @@ app.get("/api/host-status", (req, res) => {
 
 app.listen(port, BIND_HOST, () => {
   console.log(`Minecraft Claude agent running at http://${BIND_HOST === "127.0.0.1" ? "localhost" : BIND_HOST}:${port}`);
-  console.log(`Bot target: ${config.host}:${config.port} as "${config.username}"`);
-  if (!config.apiKey) {
+  console.log(`Mode: ${MODE}${MODE === "relay" ? " (waiting for a worker to attach)" : " (this machine runs the bot)"}`);
+  console.log(`Script API: POST http://${BIND_HOST === "127.0.0.1" ? "localhost" : BIND_HOST}:${port}/api/v1/instructions`);
+
+  if (process.env.API_TOKENS || process.env.API_TOKEN) {
+    console.log("Script API auth: enabled (send 'Authorization: Bearer <token>').");
+  } else {
+    console.log("Script API auth: not set — only this machine can submit instructions. Set API_TOKENS to open it up.");
+  }
+  if (MODE === "relay" && !(process.env.WORKER_TOKEN || process.env.WORKER_TOKENS)) {
+    console.log("Warning: relay mode without WORKER_TOKEN — a remote worker will not be able to attach.");
+  }
+
+  if (MODE === "local") console.log(`Bot target: ${config.host}:${config.port} as "${config.username}"`);
+  if (!config.apiKey && MODE === "local") {
     console.log("No API key saved yet. Add one in the Settings panel on the page (host-only).");
   }
   if (HOST_TOKEN) console.log("Host token auth enabled. Provide header 'x-host-token' for host actions.");

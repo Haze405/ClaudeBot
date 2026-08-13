@@ -5,7 +5,9 @@
   "type": "module",
   "description": "A hosted Claude agent that controls a Minecraft bot through the yuniko-software/minecraft-mcp-server MCP server.",
   "scripts": {
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "relay": "node src/server.js --relay",
+    "worker": "node src/worker.js"
   },
   "engines": {
     "node": ">=20.10.0"
