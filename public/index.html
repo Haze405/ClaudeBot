@@ -34,6 +34,7 @@
     Model: <input id="model" size="24"><br>
     Claude base URL: <input id="baseUrl" size="34" placeholder="https://api.claude.ai"><br>
     Claude workspace ID: <input id="workspaceId" size="34" placeholder="Optional for AWS or private deployments"><br>
+    Host token (host-only): <input id="hostToken" type="password" size="34" placeholder="optional; used for host actions"><br>
     Minecraft host: <input id="host" size="16">
     port: <input id="port" type="number" min="1" max="65535" size="8">
     bot name: <input id="username" size="16">
@@ -184,10 +185,15 @@ async function refresh() {
   applyStatus(await res.json());
 }
 
+function hostHeaders() {
+  const token = $("hostToken").value.trim();
+  return token ? { "Content-Type": "application/json", "x-host-token": token } : { "Content-Type": "application/json" };
+}
+
 $("save").onclick = async () => {
   const res = await fetch("/api/settings", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: hostHeaders(),
     body: JSON.stringify({
       apiKey: $("apiKey").value,
       model: $("model").value,
@@ -210,14 +216,14 @@ $("save").onclick = async () => {
 };
 
 $("forget").onclick = async () => {
-  const res = await fetch("/api/forget-key", { method: "POST" });
+  const res = await fetch("/api/forget-key", { method: "POST", headers: hostHeaders() });
   applyStatus(await res.json());
   line("info", "API key forgotten.");
 };
 
 $("connect").onclick = async () => {
   line("info", "Connecting to the Minecraft MCP server (first run downloads it, this can take a minute)...");
-  const res = await fetch("/api/connect", { method: "POST" });
+  const res = await fetch("/api/connect", { method: "POST", headers: hostHeaders() });
   const data = await res.json();
   if (!res.ok) { line("error", data.error); return; }
   line("info", "Connected. Tools: " + data.tools.join(", "));
@@ -225,7 +231,7 @@ $("connect").onclick = async () => {
 };
 
 $("disconnect").onclick = async () => {
-  await fetch("/api/disconnect", { method: "POST" });
+  await fetch("/api/disconnect", { method: "POST", headers: hostHeaders() });
   line("info", "Disconnected.");
   refresh();
 };
