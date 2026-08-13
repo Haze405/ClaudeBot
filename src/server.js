@@ -127,26 +127,6 @@ app.use(
   }),
 );
 
-/**
- * Host-only middleware. When `HOST_TOKEN` is set the request must include
- * header `x-host-token: <HOST_TOKEN>`. When `HOST_TOKEN` is not set, only
- * allow requests coming from loopback to keep local development convenient.
- */
-const HOST_TOKEN = process.env.HOST_TOKEN || "";
-function requireHost(req, res, next) {
-  const token = String(req.get("x-host-token") || "");
-  const ip = String(req.ip || req.connection.remoteAddress || "");
-  const isLocal = ip === "127.0.0.1" || ip === "::1" || ip.endsWith("127.0.0.1");
-
-  if (HOST_TOKEN) {
-    if (token !== HOST_TOKEN) return res.status(403).json({ error: "Forbidden: invalid host token." });
-    return next();
-  }
-
-  if (!isLocal) return res.status(403).json({ error: "Forbidden: host token required for non-local requests." });
-  return next();
-}
-
 app.get("/api/status", (req, res) => {
   const stats = queue.stats();
   res.json({
@@ -184,12 +164,12 @@ app.post("/api/settings", async (req, res) => {
   res.json({ ...publicConfig(), disconnected });
 });
 
-app.post("/api/forget-key", requireHost, (req, res) => {
+app.post("/api/forget-key", (req, res) => {
   clearApiKey();
   res.json(publicConfig());
 });
 
-app.post("/api/connect", requireHost, async (req, res) => {
+app.post("/api/connect", async (req, res) => {
   if (MODE === "relay") {
     return res.status(409).json({
       error: "This server is a relay. Connect the bot from the worker on the Minecraft machine.",
@@ -203,7 +183,7 @@ app.post("/api/connect", requireHost, async (req, res) => {
   }
 });
 
-app.post("/api/disconnect", requireHost, async (req, res) => {
+app.post("/api/disconnect", async (req, res) => {
   await mcp.disconnect();
   agent.reset();
   res.json({ connected: false });
@@ -281,16 +261,6 @@ app.use((err, req, res, next) => {
 const port = Number(process.env.PORT || 3000);
 const BIND_HOST = process.env.BIND_HOST || "127.0.0.1";
 
-// Debug/status endpoint for host-token troubleshooting. Does NOT reveal the
-// token value; it only says whether a token is required and whether the
-// caller supplied a matching header.
-app.get("/api/host-status", (req, res) => {
-  const hostTokenSet = Boolean(HOST_TOKEN);
-  const supplied = String(req.get("x-host-token") || "");
-  const match = hostTokenSet ? supplied === HOST_TOKEN : true;
-  res.json({ hostTokenRequired: hostTokenSet, suppliedMatches: match, bindHost: BIND_HOST });
-});
-
 app.listen(port, BIND_HOST, () => {
   console.log(`Minecraft Claude agent running at http://${BIND_HOST === "127.0.0.1" ? "localhost" : BIND_HOST}:${port}`);
   console.log(`Mode: ${MODE}${MODE === "relay" ? " (waiting for a worker to attach)" : " (this machine runs the bot)"}`);
@@ -309,8 +279,10 @@ app.listen(port, BIND_HOST, () => {
   if (!config.apiKey && MODE === "local") {
     console.log("No API key saved yet. Add one in the Settings panel on the page (host-only).");
   }
-  if (HOST_TOKEN) console.log("Host token auth enabled. Provide header 'x-host-token' for host actions.");
-  else if (BIND_HOST !== "127.0.0.1") console.log("Warning: server is bound to non-local address but no HOST_TOKEN is set.");
+  if (BIND_HOST !== "127.0.0.1") {
+    console.log("Warning: reachable from other machines, and every endpoint is open — anyone who");
+    console.log("can reach this URL can drive the bot and spend your Claude credits.");
+  }
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

@@ -221,8 +221,8 @@ cloudflared tunnel --url http://localhost:3000
 same. This is also the answer for **Roblox**, which cannot reach `localhost` or
 LAN addresses at all.
 
-Anyone with the URL can reach the page, so set `API_TOKENS` — and `HOST_TOKEN`,
-below — before starting a tunnel.
+Anyone with the URL can reach the page and drive the bot — there is no
+password. Shut the tunnel down when you're done.
 
 ## Reference images
 
@@ -269,61 +269,38 @@ they act as the initial defaults, and anything saved in the UI overrides them.
 
 | Variable      | Purpose                                                              |
 | ------------- | -------------------------------------------------------------------- |
-| `API_TOKENS`  | Tokens allowed to submit instructions, comma-separated. Unset means local only. |
-| `WORKER_TOKEN`| Token a remote worker uses to pull instructions.                     |
+| `API_TOKENS`  | Optional. Tokens required to submit instructions, comma-separated. **Unset means no authentication at all.** |
+| `WORKER_TOKEN`| Optional. Token a remote worker uses to pull instructions.           |
 | `RELAY_ONLY`  | `1` to run as a relay with no local bot. Same as `npm run relay`.    |
 | `RELAY_URL`   | *(worker)* The relay to pull instructions from.                      |
 | `WORKER_NAME` | *(worker)* A label for this machine. Defaults to its hostname.        |
-| `HOST_TOKEN`  | Token for host-only actions — see below.                             |
 | `BIND_HOST`   | Address to listen on. Default `127.0.0.1`.                           |
 | `PORT`        | Default `3000`.                                                      |
 
 ## Notes
 
-- The server binds to `127.0.0.1` by default, since the settings endpoint
-  accepts an API key — it is not reachable from other machines until you set
-  `BIND_HOST`. Set `API_TOKENS` and `HOST_TOKEN` when you do.
+- The server binds to `127.0.0.1` by default, so it is not reachable from other
+  machines until you set `BIND_HOST`. Once you do, it is fully open.
 
 ## Host / Prompter (cloud-friendly)
 
-This repo supports a two-person workflow for cloud-hosted deployments (for
-example on Vercel): one person is the *host* who runs the Minecraft world and
-manages the bot/API key, and the other is the *prompter* who sends instructions
-to the bot from a browser.
+One person runs the Minecraft world and the server; anyone who can reach the
+URL can send instructions from the web page or the API.
 
-- Host responsibilities: set the Claude API key, call **Connect bot**, and run
-  the Minecraft world (open to LAN). These actions are protected and require
-  a host token when the server is reachable remotely.
-- Prompter responsibilities: open the web UI and use the chat box to send
-  instructions and images. The prompter does not receive the API key and
-  cannot change host settings.
-
-Configuration for cloud deployment:
-
-- `HOST_TOKEN` — a secret string used to authenticate host-only actions
-  (`/api/settings`, `/api/connect`, `/api/disconnect`, `/api/forget-key`).
-  Set this as an environment variable on your server (e.g. Vercel project
-  env). The host must include the HTTP header `x-host-token: <HOST_TOKEN>`
-  when calling those endpoints.
-- `BIND_HOST` — address to bind the Express server to. Default `127.0.0.1`.
-  Set to `0.0.0.0` or your public hostname for a cloud deployment.
-
-Security notes:
-
-- If `HOST_TOKEN` is not set, host-only endpoints are only allowed from
-  loopback (local requests). If you bind the server to a public address,
-  set `HOST_TOKEN` to prevent remote parties from changing the API key or
-  disconnecting the bot.
-
-Example: on a deployed server set the environment variables and run the app
-as usual (or configure with your cloud provider's env vars):
+There is **no host password.** Every endpoint is open — connecting and
+disconnecting the bot, changing settings, and sending instructions. Whoever has
+the URL has all of it, and every instruction spends your Claude credits.
 
 ```bash
-HOST_TOKEN="s3cret" BIND_HOST=0.0.0.0 PORT=3000 node src/server.js
+BIND_HOST=0.0.0.0 PORT=3000 node src/server.js
 ```
 
-Then the host can make host actions with the header `x-host-token: s3cret`.
-Prompters only need to open the UI and use the chat.
+Set `API_TOKENS` if you later want to require a token on `/api/v1`.
+
+The one thing that stays locked down is `baseUrl` — it cannot be changed over
+HTTP, because it is where your API key gets sent. Change it with
+`ANTHROPIC_BASE_URL` or by editing `config.local.json`.
+
 - The agent keeps one conversation. **New conversation** clears it; the bot
   stays connected.
 - Tool calls run sequentially, since movement and block placement are ordered.

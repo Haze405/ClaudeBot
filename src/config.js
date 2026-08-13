@@ -59,7 +59,11 @@ const MC_FIELDS = ["host", "port", "username"];
 export function updateConfig(patch) {
   const next = {};
 
-  for (const field of ["apiKey", "model", "baseUrl", "workspaceId", "host", "username"]) {
+  // `baseUrl` is deliberately not settable over HTTP. It is where the API key
+  // gets sent, so anyone able to change it can point this server at their own
+  // endpoint and collect the key on the next request. Set it from the
+  // environment (ANTHROPIC_BASE_URL) or by editing config.local.json.
+  for (const field of ["apiKey", "model", "workspaceId", "host", "username"]) {
     const value = patch[field];
     if (typeof value === "string" && value.trim()) next[field] = value.trim();
   }

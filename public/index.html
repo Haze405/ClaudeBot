@@ -34,7 +34,6 @@
     Model: <input id="model" size="24"><br>
     Claude base URL: <input id="baseUrl" size="34" placeholder="https://api.claude.ai"><br>
     Claude workspace ID: <input id="workspaceId" size="34" placeholder="Optional for AWS or private deployments"><br>
-    Host token (host-only): <input id="hostToken" type="password" size="34" placeholder="optional; used for host actions"><br>
     Minecraft host: <input id="host" size="16">
     port: <input id="port" type="number" min="1" max="65535" size="8">
     bot name: <input id="username" size="16">
@@ -186,8 +185,7 @@ async function refresh() {
 }
 
 function hostHeaders() {
-  const token = $("hostToken").value.trim();
-  return token ? { "Content-Type": "application/json", "x-host-token": token } : { "Content-Type": "application/json" };
+  return { "Content-Type": "application/json" };
 }
 
 $("save").onclick = async () => {

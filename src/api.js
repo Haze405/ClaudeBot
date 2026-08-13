@@ -32,24 +32,15 @@ function readToken(req) {
   return "";
 }
 
-function isLoopback(req) {
-  const ip = String(req.ip || req.socket?.remoteAddress || "");
-  return ip === "127.0.0.1" || ip === "::1" || ip.endsWith("127.0.0.1");
-}
-
 /**
- * Builds an auth gate. When tokens are configured the caller must present one;
- * when none are configured only loopback callers get through, so a server that
- * is accidentally exposed without tokens is not wide open.
+ * Builds an auth gate. Open when no tokens are configured; requires a matching
+ * token when they are.
  */
-function requireToken(tokens, what) {
+function requireToken(tokens) {
   return (req, res, next) => {
-    if (tokens.length === 0) {
-      if (isLoopback(req)) return next();
-      return res.status(403).json({
-        error: `Forbidden: set ${what} on the server to accept requests from other machines.`,
-      });
-    }
+    // No tokens configured means no auth at all — anyone who can reach the
+    // server can use it. Set the env var to require a token instead.
+    if (tokens.length === 0) return next();
     if (!tokenMatches(readToken(req), tokens)) {
       return res.status(401).json({ error: "Unauthorized: missing or invalid API token." });
     }
@@ -76,8 +67,8 @@ export function createApiRouter({ queue, validateImages, describeRuntime }) {
 
   const clientTokens = tokenList(process.env.API_TOKENS || process.env.API_TOKEN);
   const workerTokens = tokenList(process.env.WORKER_TOKEN || process.env.WORKER_TOKENS);
-  const clientAuth = requireToken(clientTokens, "API_TOKENS");
-  const workerAuth = requireToken(workerTokens, "WORKER_TOKEN");
+  const clientAuth = requireToken(clientTokens);
+  const workerAuth = requireToken(workerTokens);
 
   // ---------------------------------------------------------------- clients
 
