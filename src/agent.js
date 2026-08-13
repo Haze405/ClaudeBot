@@ -46,12 +46,30 @@ export class MinecraftAgent {
       "Builds and journeys take many tool calls: keep going until the task is finished rather than",
       "reporting a plan back. If a tool fails, read the error and try a different approach.",
       "Reply to the person briefly — what you did and what the world looks like now.",
+      "",
+      "The person may attach a reference image. You can see those directly, but you still cannot",
+      "see the world you are building in, so read the image for what to build — shape, proportions,",
+      "colors to match with blocks — and use tools to check what is actually there.",
+      "An attached image stays visible for the rest of the conversation, so refer back to it as you build.",
     ].join("\n");
   }
 
-  /** Yields UI events as the turn progresses. */
-  async *run(userMessage, { maxTurns = MAX_TURNS } = {}) {
-    this.messages.push({ role: "user", content: userMessage });
+  /**
+   * Yields UI events as the turn progresses.
+   * `images` are `{ mediaType, data }` with base64 data, already validated.
+   */
+  async *run(userMessage, { images = [], maxTurns = MAX_TURNS } = {}) {
+    // Images go before the text — Claude reads a prompt better when the image
+    // it refers to is already in view.
+    const content = [
+      ...images.map((image) => ({
+        type: "image",
+        source: { type: "base64", media_type: image.mediaType, data: image.data },
+      })),
+      { type: "text", text: userMessage },
+    ];
+
+    this.messages.push({ role: "user", content });
     const tools = this.mcp.anthropicTools();
 
     for (let turn = 0; turn < maxTurns; turn++) {

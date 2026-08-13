@@ -40,6 +40,27 @@ browser  ->  Express (src/server.js)  ->  Claude Messages API
    server, which can take a minute. `ClaudeBot` spawns in your world.
 7. Type an instruction, e.g. `Build a 5x5 dirt platform above me`.
 
+## Reference images
+
+Attach an image and Claude can see it while it builds — hand it a screenshot,
+a sketch, or a photo and say `build this out of stone`.
+
+Three ways to attach: the file picker next to the message box, **Ctrl+V** to
+paste from the clipboard, or drag an image file onto the log. Thumbnails of
+what's attached appear above the message box, each with an `x` to remove it.
+They're sent when you hit Send.
+
+- JPEG, PNG, GIF, and WebP, up to 5MB and 4 images per message.
+- The real format is detected from the file's bytes, not its extension. Windows
+  reports the type from the extension, so a HEIC or AVIF saved as `.jpg` would
+  otherwise be rejected by the API with a confusing "format not supported"
+  error; those now get a clear message telling you to re-save as PNG or JPEG.
+- An attached image stays in the conversation, so follow-ups like
+  `make the roof match the picture` still refer to it. **New conversation**
+  clears it.
+- Claude still can't see the Minecraft world itself — only the reference image
+  and whatever the tools report back.
+
 ## Settings
 
 | Field        | Default         | Notes                                            |
@@ -64,6 +85,47 @@ they act as the initial defaults, and anything saved in the UI overrides them.
 
 - The server binds to `127.0.0.1` only, since the settings endpoint accepts an
   API key. It is not reachable from other machines on your network.
+
+## Host / Prompter (cloud-friendly)
+
+This repo supports a two-person workflow for cloud-hosted deployments (for
+example on Vercel): one person is the *host* who runs the Minecraft world and
+manages the bot/API key, and the other is the *prompter* who sends instructions
+to the bot from a browser.
+
+- Host responsibilities: set the Claude API key, call **Connect bot**, and run
+  the Minecraft world (open to LAN). These actions are protected and require
+  a host token when the server is reachable remotely.
+- Prompter responsibilities: open the web UI and use the chat box to send
+  instructions and images. The prompter does not receive the API key and
+  cannot change host settings.
+
+Configuration for cloud deployment:
+
+- `HOST_TOKEN` — a secret string used to authenticate host-only actions
+  (`/api/settings`, `/api/connect`, `/api/disconnect`, `/api/forget-key`).
+  Set this as an environment variable on your server (e.g. Vercel project
+  env). The host must include the HTTP header `x-host-token: <HOST_TOKEN>`
+  when calling those endpoints.
+- `BIND_HOST` — address to bind the Express server to. Default `127.0.0.1`.
+  Set to `0.0.0.0` or your public hostname for a cloud deployment.
+
+Security notes:
+
+- If `HOST_TOKEN` is not set, host-only endpoints are only allowed from
+  loopback (local requests). If you bind the server to a public address,
+  set `HOST_TOKEN` to prevent remote parties from changing the API key or
+  disconnecting the bot.
+
+Example: on a deployed server set the environment variables and run the app
+as usual (or configure with your cloud provider's env vars):
+
+```bash
+HOST_TOKEN="s3cret" BIND_HOST=0.0.0.0 PORT=3000 node src/server.js
+```
+
+Then the host can make host actions with the header `x-host-token: s3cret`.
+Prompters only need to open the UI and use the chat.
 - The agent keeps one conversation. **New conversation** clears it; the bot
   stays connected.
 - Tool calls run sequentially, since movement and block placement are ordered.
