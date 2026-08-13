@@ -233,6 +233,16 @@ app.use((err, req, res, next) => {
 const port = Number(process.env.PORT || 3000);
 const BIND_HOST = process.env.BIND_HOST || "127.0.0.1";
 
+// Debug/status endpoint for host-token troubleshooting. Does NOT reveal the
+// token value; it only says whether a token is required and whether the
+// caller supplied a matching header.
+app.get("/api/host-status", (req, res) => {
+  const hostTokenSet = Boolean(HOST_TOKEN);
+  const supplied = String(req.get("x-host-token") || "");
+  const match = hostTokenSet ? supplied === HOST_TOKEN : true;
+  res.json({ hostTokenRequired: hostTokenSet, suppliedMatches: match, bindHost: BIND_HOST });
+});
+
 app.listen(port, BIND_HOST, () => {
   console.log(`Minecraft Claude agent running at http://${BIND_HOST === "127.0.0.1" ? "localhost" : BIND_HOST}:${port}`);
   console.log(`Bot target: ${config.host}:${config.port} as "${config.username}"`);
