@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = path.join(__dirname, "..", "config.local.json");
+const TMP_CONFIG_FILE = path.join(os.tmpdir(), "minecraftmcp-config.local.json");
 
 // Environment variables act as initial defaults; anything saved from the
 // settings panel wins and is persisted to config.local.json.
@@ -20,8 +22,14 @@ const DEFAULTS = {
 function readSaved() {
   try {
     return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-  } catch {
-    return {};
+  } catch (err) {
+    // If the repo lives on a read-only filesystem (serverless platforms)
+    // fall back to a temp-file which is writable for the process lifetime.
+    try {
+      return JSON.parse(fs.readFileSync(TMP_CONFIG_FILE, "utf8"));
+    } catch {
+      return {};
+    }
   }
 }
 
@@ -76,5 +84,19 @@ export function clearApiKey() {
 }
 
 function save() {
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  try {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
+  } catch (err) {
+    // EROFS: read-only filesystem (e.g., serverless). Fall back to tmp dir
+    // and keep running; warn so operators know the setting won't persist
+    // across restarts.
+    try {
+      fs.writeFileSync(TMP_CONFIG_FILE, JSON.stringify(config, null, 2) + "\n");
+      console.warn(
+        `Warning: could not write ${CONFIG_FILE} (${err.code}). Using ${TMP_CONFIG_FILE} for this run only.`,
+      );
+    } catch (err2) {
+      console.warn(`Warning: failed to persist settings: ${err.message}; ${err2.message}`);
+    }
+  }
 }
